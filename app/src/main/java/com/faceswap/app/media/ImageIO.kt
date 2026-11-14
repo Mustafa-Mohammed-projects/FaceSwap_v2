@@ -19,8 +19,8 @@ import kotlin.random.Random
 
 object ImageIO {
 
-    // قائمة موديلات الهواتف وكاميراتها لتنويع بصمات الـ Dataset (Dataset Hardening)
-    private data_class DeviceProfile(val make: String, val model: String, val focalLength: String, val fNumber: String)
+    // تعريف ملفات الكاميرات لتنويع الـ Dataset بدون أخطاء تركيبية
+    private data class DeviceProfile(val make: String, val model: String, val focalLength: String, val fNumber: String)
     
     private val DEVICE_PROFILES = listOf(
         DeviceProfile("samsung", "Samsung Galaxy S23 Ultra", "6.3", "1.7"),
@@ -65,10 +65,6 @@ object ImageIO {
      */
     fun save(ctx: Context, bmp: Bitmap, baseName: String, png: Boolean): Uri {
         val r = ctx.contentResolver
-        
-        // في حالة كانت الصورة PNG ولم يُطلب صراحة حفظها كـ PNG، أو لتطبيق الحماية المتقدمة على JPEG:
-        val targetFormatPng = png && false // نفضل ممر JPEG لضمان كسر الـ Gradients الطبيعية ونمذجة الكاميرات الحقيقية
-        
         val tempFile = File(ctx.cacheDir, "sec_${System.currentTimeMillis()}.jpg")
         
         try {
@@ -150,4 +146,3 @@ object ImageIO {
         return mutableBitmap
     }
 }
-
