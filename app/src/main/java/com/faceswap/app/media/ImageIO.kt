@@ -8,6 +8,7 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.ImageDecoder
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -18,16 +19,6 @@ import kotlin.math.max
 import kotlin.random.Random
 
 object ImageIO {
-
-    // تعريف ملفات الكاميرات لتنويع الـ Dataset بدون أخطاء تركيبية
-    private data class DeviceProfile(val make: String, val model: String, val focalLength: String, val fNumber: String)
-    
-    private val DEVICE_PROFILES = listOf(
-        DeviceProfile("samsung", "Samsung Galaxy S23 Ultra", "6.3", "1.7"),
-        DeviceProfile("Apple", "iPhone 14 Pro", "6.86", "1.78"),
-        DeviceProfile("Xiaomi", "Xiaomi 13 Pro", "8.6", "1.9"),
-        DeviceProfile("Google", "Pixel 7 Pro", "6.81", "1.85")
-    )
 
     /** Decodes with EXIF rotation applied. Downscales only if the longest side exceeds [maxSide]. */
     fun decode(ctx: Context, uri: Uri, maxSide: Int, mutable: Boolean = true): Bitmap {
@@ -58,50 +49,52 @@ object ImageIO {
     fun isPng(ctx: Context, uri: Uri) = ctx.contentResolver.getType(uri)?.contains("png") == true
 
     /**
-     * يحفظ الصورة مع تطبيق معايير مضادة للكشف:
-     * 1. تطبيق طبقة التشويش وإخفاء التعديل (Anti-Forensic Layer).
-     * 2. إعادة الضغط المرحلي (Multi-pass JPEG Compression: 95 ثم 90).
-     * 3. تنويع وحقن بيانات Exif كاميرات الهواتف الحقيقية تلقائياً.
+     * حفظ الصورة مع طبقة حماية متقدمة للـ Dataset (مقاومة لكشف ELA والذكاء الاصطناعي):
      */
     fun save(ctx: Context, bmp: Bitmap, baseName: String, png: Boolean): Uri {
         val r = ctx.contentResolver
         val tempFile = File(ctx.cacheDir, "sec_${System.currentTimeMillis()}.jpg")
         
         try {
-            // الخطوة 1: تطبيق طبقة إخفاء التعديل والتشويش المجهري
-            val antiForensicBmp = applyAntiForensicLayer(bmp)
+            // 1. تطبيق طبقة إخفاء التعديل العميقة (Anti-Forensic & Noise Layer)
+            val antiForensicBmp = applyAdvancedAntiForensicLayer(bmp)
 
-            // الخطوة 2: مرحلة الضغط الأولى (Quality 95)
-            val fos1 = FileOutputStream(tempFile)
-            antiForensicBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos1)
-            fos1.flush()
-            fos1.close()
+            // 2. الضغط المرحلي الأول (Quality 94) لدمج الترددات
+            FileOutputStream(tempFile).use { fos ->
+                antiForensicBmp.compress(Bitmap.CompressFormat.JPEG, 94, fos)
+            }
 
-            // الخطوة 3: مرحلة الضغط الثانية (Multi-pass compression Quality 90) لتدمير حواف الدمج الفردية
-            val decodedIntermediate = android.graphics.BitmapFactory.decodeFile(tempFile.absolutePath)
-            val fos2 = FileOutputStream(tempFile)
-            decodedIntermediate.compress(Bitmap.CompressFormat.JPEG, 90, fos2)
-            fos2.flush()
-            fos2.close()
-            decodedIntermediate.recycle()
-            if (antiForensicBmp != bmp) antiForensicBmp.recycle()
+            // 3. الضغط المرحلي الثاني (Quality 91) لتدمير أي بصمات تدرج رقمية (Gradient Traces)
+            val decodedIntermediate = BitmapFactory.decodeFile(tempFile.absolutePath)
+            if (decodedIntermediate != null) {
+                FileOutputStream(tempFile).use { fos ->
+                    decodedIntermediate.compress(Bitmap.CompressFormat.JPEG, 91, fos)
+                }
+                decodedIntermediate.recycle()
+            }
+            if (antiForensicBmp != bmp) {
+                antiForensicBmp.recycle()
+            }
 
-            // الخطوة 4: حقن Exif عشوائي لهواتف حقيقية (Device Diversification)
-            val profile = DEVICE_PROFILES.random()
+            // 4. اختيار عشوائي لكاميرا هاتف حقيقية وحقن بيانات الـ Exif متكاملة
+            val makes = arrayOf("samsung", "Apple", "Xiaomi", "Google")
+            val models = arrayOf("Samsung Galaxy S23 Ultra", "iPhone 14 Pro", "Xiaomi 13 Pro", "Pixel 7 Pro")
+            val idx = Random.nextInt(makes.size)
+
             val exif = ExifInterface(tempFile.absolutePath)
-            exif.setAttribute(ExifInterface.TAG_MAKE, profile.make)
-            exif.setAttribute(ExifInterface.TAG_MODEL, profile.model)
-            exif.setAttribute(ExifInterface.TAG_DATETIME, "2026:11:14 20:00:00")
-            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2026:11:14 20:00:00")
-            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, "2026:11:14 20:00:00")
-            exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, "1/${listOf(30, 50, 60, 120, 250).random()}")
-            exif.setAttribute(ExifInterface.TAG_F_NUMBER, profile.fNumber)
-            exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, listOf("50", "100", "200", "400").random())
-            exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, profile.focalLength)
+            exif.setAttribute(ExifInterface.TAG_MAKE, makes[idx])
+            exif.setAttribute(ExifInterface.TAG_MODEL, models[idx])
+            exif.setAttribute(ExifInterface.TAG_DATETIME, "2026:11:15 01:30:00")
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2026:11:15 01:30:00")
+            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, "2026:11:15 01:30:00")
+            exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, "1/100")
+            exif.setAttribute(ExifInterface.TAG_F_NUMBER, "2.2")
+            exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, "80")
+            exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, "4.2")
             exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, ExifInterface.WHITE_BALANCE_AUTO.toString())
             exif.saveAttributes()
 
-            // الخطوة 5: النقل النهائي إلى مجلد التخزين العام Pictures/FaceSwap
+            // 5. التصدير النهائي للمجلد العام
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, baseName + ".jpg")
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -119,24 +112,26 @@ object ImageIO {
             
             return uri
         } finally {
-            if (tempFile.exists()) tempFile.delete()
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
         }
     }
 
     /**
-     * طبقة تشتيت مجهرية تمنع اكتشاف التلاعب عبر ELA وتحليلات التشويش
+     * طبقة تشتيت متطورة تحاكي الضجيج البصري لمستشعرات الهواتف وتكسر تحليلات ELA
      */
-    private fun applyAntiForensicLayer(bitmap: Bitmap): Bitmap {
+    private fun applyAdvancedAntiForensicLayer(bitmap: Bitmap): Bitmap {
         val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(mutableBitmap)
         val paint = Paint()
 
-        // مصفوفة ألوان تحدث انحرافاً لا يلاحظه الإنسان لكسر الـ Gradients المتوقعة لبرمجيات التعديل
+        // تعديل طفيف جداً في توزيع القنوات اللونية لإخفاء حواف الدمج الفردية
         val colorMatrix = ColorMatrix().apply {
             set(floatArrayOf(
-                1.008f, 0f, 0f, 0f, Random.nextFloat() * 1.5f - 0.75f,
-                0f, 1.008f, 0f, 0f, Random.nextFloat() * 1.5f - 0.75f,
-                0f, 0f, 1.008f, 0f, Random.nextFloat() * 1.5f - 0.75f,
+                1.004f, 0f, 0f, 0f, Random.nextFloat() * 1.0f - 0.5f,
+                0f, 1.004f, 0f, 0f, Random.nextFloat() * 1.0f - 0.5f,
+                0f, 0f, 1.004f, 0f, Random.nextFloat() * 1.0f - 0.5f,
                 0f, 0f, 0f, 1f, 0f
             ))
         }
